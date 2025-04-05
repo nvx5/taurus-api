@@ -31,14 +31,29 @@ jobs:
         az acr build --registry taurusapiregistry \
                     --image taurus-api:latest \
                     --image taurus-api:${{ github.sha }} .
+    
+    - name: Get ACR credentials
+      run: |
+        echo "Getting ACR credentials for Container App..."
+        ACR_USERNAME=$(az acr credential show --name taurusapiregistry --query "username" -o tsv)
+        ACR_PASSWORD=$(az acr credential show --name taurusapiregistry --query "passwords[0].value" -o tsv)
+        
+        # Store as environment variables for next steps
+        echo "ACR_USERNAME=$ACR_USERNAME" >> $GITHUB_ENV
+        echo "ACR_PASSWORD=$ACR_PASSWORD" >> $GITHUB_ENV
       
     - name: Deploy to Azure Container App
       run: |
         echo "Deploying to Azure Container App..."
+        
+        # Update Container App with explicit registry credentials
         az containerapp update \
           --name taurus-api \
           --resource-group taurus-api-rg \
-          --image taurusapiregistry.azurecr.io/taurus-api:latest
+          --image taurusapiregistry.azurecr.io/taurus-api:latest \
+          --registry-server taurusapiregistry.azurecr.io \
+          --registry-username ${{ env.ACR_USERNAME }} \
+          --registry-password ${{ env.ACR_PASSWORD }}
       
     - name: Get Container App URL
       run: |
