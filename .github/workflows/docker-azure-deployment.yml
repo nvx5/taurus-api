@@ -7,7 +7,7 @@ on:
 
 env:
   REGISTRY_NAME: taurusapiregistry
-  APP_NAME: taurus-api
+  APP_NAME: taurus-transit-api
   RESOURCE_GROUP: taurus-api-rg
   PYTHON_VERSION: "3.10"
 
