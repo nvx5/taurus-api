@@ -5,12 +5,6 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
-env:
-  REGISTRY_NAME: taurusapiregistry
-  APP_NAME: taurus-transit-api
-  RESOURCE_GROUP: taurus-api-rg
-  PYTHON_VERSION: "3.10"
-
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -24,55 +18,19 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
-    - name: Verify ACR access and status
+    - name: Build and push image directly with Azure CLI
       run: |
-        echo "Checking ACR Status..."
-        az acr show --name taurusapiregistry --query "provisioningState" -o tsv
+        echo "Building and pushing with Azure CLI..."
         
-        echo "Verifying admin account is enabled..."
-        ADMIN_ENABLED=$(az acr show --name taurusapiregistry --query "adminUserEnabled" -o tsv)
-        if [ "$ADMIN_ENABLED" == "true" ]; then
-          echo "✅ Admin account is enabled"
-        else
-          echo "❌ Admin account is NOT enabled. Enabling now..."
-          az acr update --name taurusapiregistry --admin-enabled true
-        fi
-      
-    - name: Build Docker image
-      run: |
-        echo "Building Docker image..."
-        docker build -t taurusapiregistry.azurecr.io/taurus-transit-api:latest .
-      
-    - name: Login to ACR and diagnose issues
-      run: |
-        echo "Attempting login to ACR..."
+        # Enable admin on ACR if not already enabled
+        echo "Ensuring admin is enabled on ACR..."
+        az acr update --name taurusapiregistry --admin-enabled true
         
-        # Debug: Check ACR is reachable
-        echo "Checking if ACR is reachable..."
-        curl -I https://taurusapiregistry.azurecr.io/v2/ || echo "Registry may not be accessible"
-        
-        # Try getting a token directly
-        echo "Trying to get ACR token..."
-        LOGIN_RESULT=$(docker login taurusapiregistry.azurecr.io -u taurusapiregistry -p ${{ secrets.ACR_PASSWORD }} 2>&1) || echo "Initial login failed"
-        echo "$LOGIN_RESULT"
-        
-        # If failed, try with quotes and manual flag
-        if [[ "$LOGIN_RESULT" == *"unauthorized"* ]]; then
-          echo "Trying alternative login method..."
-          echo ${{ secrets.ACR_PASSWORD }} | docker login taurusapiregistry.azurecr.io --username taurusapiregistry --password-stdin
-        fi
-        
-        # Verify Docker login was successful
-        if ! docker login taurusapiregistry.azurecr.io -u taurusapiregistry -p ${{ secrets.ACR_PASSWORD }}; then
-          echo "❌ ACR login still failing, trying from Azure CLI..."
-          # Try getting ACR credentials directly from Azure CLI
-          az acr login --name taurusapiregistry
-        fi
-      
-    - name: Push Docker image to ACR
-      run: |
-        echo "Pushing Docker image to ACR..."
-        docker push taurusapiregistry.azurecr.io/taurus-transit-api:latest
+        # Build and push directly with ACR Tasks
+        echo "Building and pushing with ACR Tasks..."
+        az acr build --registry taurusapiregistry \
+                    --image taurus-transit-api:latest \
+                    --image taurus-transit-api:${{ github.sha }} .
       
     - name: Deploy to Azure Container App
       run: |
