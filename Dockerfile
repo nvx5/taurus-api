@@ -1,4 +1,5 @@
-FROM python:3.10-slim
+ARG PYTHON_VERSION=3.10
+FROM python:${PYTHON_VERSION}-slim
 
 WORKDIR /app
 
@@ -43,6 +44,8 @@ RUN apt-get update && apt-get install -y \
     libxrender1 \
     libxss1 \
     libxtst6 \
+    git \
+    build-essential \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -54,9 +57,15 @@ ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV SELENIUM_HEADLESS=1
 ENV PYTHONUNBUFFERED=1
 
-# Copy requirements first for better cache utilization
+# Copy requirements first
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+
+# Install packages except swisseph
+RUN grep -v "swisseph" requirements.txt > requirements_without_swisseph.txt && \
+    pip install --no-cache-dir -r requirements_without_swisseph.txt
+
+# Install swisseph directly from source
+RUN pip install swisseph
 
 # Copy application files
 COPY . .
