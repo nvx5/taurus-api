@@ -46,14 +46,20 @@ jobs:
       run: |
         echo "Deploying to Azure Container App..."
         
-        # Update Container App with explicit registry credentials
+        # First try a different approach with secrets
+        echo "Using secrets for Container App..."
+        az containerapp registry set \
+          --name taurus-api \
+          --resource-group taurus-api-rg \
+          --server taurusapiregistry.azurecr.io \
+          --username "${{ env.ACR_USERNAME }}" \
+          --password "${{ env.ACR_PASSWORD }}"
+          
+        # Now update the image
         az containerapp update \
           --name taurus-api \
           --resource-group taurus-api-rg \
-          --image taurusapiregistry.azurecr.io/taurus-api:latest \
-          --registry-server taurusapiregistry.azurecr.io \
-          --registry-username ${{ env.ACR_USERNAME }} \
-          --registry-password ${{ env.ACR_PASSWORD }}
+          --image taurusapiregistry.azurecr.io/taurus-api:latest
       
     - name: Get Container App URL
       run: |
