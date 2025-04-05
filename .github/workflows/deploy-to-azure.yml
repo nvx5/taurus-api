@@ -19,51 +19,30 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v3
       
-    # This step is only to validate dependencies, the actual build will use Docker
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        
-    - name: Install basic deps
-      run: |
-        python -m pip install --upgrade pip setuptools wheel
-        # Skip swisseph in the test, it will be installed in the Docker container
-        grep -v "swisseph" requirements.txt > requirements_without_swisseph.txt
-        pip install -r requirements_without_swisseph.txt
-        
-    - name: Log in to Azure
+    - name: Login to Azure
       uses: azure/login@v1
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
         
-    # Alternative ACR login approach
-    - name: Log in to ACR directly
+    - name: Build Docker image
       run: |
-        echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ env.REGISTRY_NAME }}.azurecr.io -u ${{ secrets.ACR_USERNAME }} --password-stdin
-        
-    - name: Build and push Docker image
+        docker build -t taurusapiregistry.azurecr.io/taurus-transit-api:latest .
+      
+    - name: Login to ACR with admin credentials
       run: |
-        docker build -t ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }} -t ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:latest .
-        docker push ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }}
-        docker push ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:latest
-        
-    - name: Deploy to Azure Container Apps
-      uses: azure/CLI@v1
-      with:
-        inlineScript: |
-          az config set extension.use_dynamic_install=yes_without_prompt
-          az containerapp update \
-            --name ${{ env.APP_NAME }} \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --image ${{ env.REGISTRY_NAME }}.azurecr.io/${{ env.APP_NAME }}:${{ github.sha }}
-            
+        docker login taurusapiregistry.azurecr.io -u taurusapiregistry -p ${{ secrets.ACR_PASSWORD }}
+      
+    - name: Push Docker image to ACR
+      run: |
+        docker push taurusapiregistry.azurecr.io/taurus-transit-api:latest
+      
+    - name: Deploy to Azure Container App
+      run: |
+        az containerapp update \
+          --name taurus-transit-api \
+          --resource-group taurus-api-rg \
+          --image taurusapiregistry.azurecr.io/taurus-transit-api:latest
+      
     - name: Get Container App URL
-      uses: azure/CLI@v1
-      with:
-        inlineScript: |
-          echo "Container App URL: https://$(az containerapp show --name ${{ env.APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)"
-          
-    - name: Print deployment URL
       run: |
-        echo "Deployment successful! Your API is available at: https://$(az containerapp show --name ${{ env.APP_NAME }} --resource-group ${{ env.RESOURCE_GROUP }} --query properties.configuration.ingress.fqdn -o tsv)" 
+        echo "Deployment successful! Your API is available at: https://$(az containerapp show --name taurus-transit-api --resource-group taurus-api-rg --query properties.configuration.ingress.fqdn -o tsv)" 
