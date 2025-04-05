@@ -29,17 +29,17 @@ jobs:
         # Build and push directly with ACR Tasks
         echo "Building and pushing with ACR Tasks..."
         az acr build --registry taurusapiregistry \
-                    --image taurus-transit-api:latest \
-                    --image taurus-transit-api:${{ github.sha }} .
+                    --image taurus-api:latest \
+                    --image taurus-api:${{ github.sha }} .
       
     - name: Deploy to Azure Container App
       run: |
         echo "Deploying to Azure Container App..."
         az containerapp update \
-          --name taurus-transit-api \
+          --name taurus-api \
           --resource-group taurus-api-rg \
-          --image taurusapiregistry.azurecr.io/taurus-transit-api:latest
+          --image taurusapiregistry.azurecr.io/taurus-api:latest
       
     - name: Get Container App URL
       run: |
-        echo "Deployment successful! Your API is available at: https://$(az containerapp show --name taurus-transit-api --resource-group taurus-api-rg --query properties.configuration.ingress.fqdn -o tsv)" 
+        echo "Deployment successful! Your API is available at: https://$(az containerapp show --name taurus-api --resource-group taurus-api-rg --query properties.configuration.ingress.fqdn -o tsv)" 
