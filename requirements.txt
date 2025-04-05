@@ -1,7 +1,7 @@
 flask==2.3.3
 flask-cors==4.0.0
 gunicorn==21.2.0
-swisseph==0.6.2
+swisseph==0.8.0
 pytz==2023.3
 timezonefinder==6.2.0
 requests==2.31.0
