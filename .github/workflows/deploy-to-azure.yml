@@ -1,4 +1,4 @@
-name: Deploy to Azure Container Apps
+name: Deploy Diagnostic App to Azure
 
 on:
   push:
@@ -18,19 +18,20 @@ jobs:
       with:
         creds: ${{ secrets.AZURE_CREDENTIALS }}
     
-    - name: Build and push image directly with Azure CLI
+    - name: Build and push diagnostic image with Azure CLI
       run: |
-        echo "Building and pushing with Azure CLI..."
+        echo "Building and pushing diagnostic image..."
         
         # Enable admin on ACR if not already enabled
         echo "Ensuring admin is enabled on ACR..."
         az acr update --name taurusapiregistry --admin-enabled true
         
-        # Build and push directly with ACR Tasks
+        # Build and push directly with ACR Tasks using the debug Dockerfile
         echo "Building and pushing with ACR Tasks..."
         az acr build --registry taurusapiregistry \
-                    --image taurus-api:latest \
-                    --image taurus-api:${{ github.sha }} .
+                    --file Dockerfile.debug \
+                    --image taurus-api-debug:latest \
+                    --image taurus-api-debug:${{ github.sha }} .
     
     - name: Get ACR credentials
       run: |
@@ -41,26 +42,51 @@ jobs:
         # Store as environment variables for next steps
         echo "ACR_USERNAME=$ACR_USERNAME" >> $GITHUB_ENV
         echo "ACR_PASSWORD=$ACR_PASSWORD" >> $GITHUB_ENV
-      
-    - name: Deploy to Azure Container App
+    
+    - name: Create diagnostic Container App
       run: |
-        echo "Deploying to Azure Container App..."
+        echo "Creating a new diagnostic Container App..."
         
-        # First try a different approach with secrets
-        echo "Using secrets for Container App..."
-        az containerapp registry set \
-          --name taurus-api \
-          --resource-group taurus-api-rg \
-          --server taurusapiregistry.azurecr.io \
-          --username "${{ env.ACR_USERNAME }}" \
-          --password "${{ env.ACR_PASSWORD }}"
+        # First check if the app already exists
+        if az containerapp show --name taurus-api-debug --resource-group taurus-api-rg &>/dev/null; then
+          echo "Diagnostic app already exists, updating it..."
           
-        # Now update the image
-        az containerapp update \
-          --name taurus-api \
-          --resource-group taurus-api-rg \
-          --image taurusapiregistry.azurecr.io/taurus-api:latest
+          # Configure registry access
+          az containerapp registry set \
+            --name taurus-api-debug \
+            --resource-group taurus-api-rg \
+            --server taurusapiregistry.azurecr.io \
+            --username "${{ env.ACR_USERNAME }}" \
+            --password "${{ env.ACR_PASSWORD }}"
+            
+          # Update the image
+          az containerapp update \
+            --name taurus-api-debug \
+            --resource-group taurus-api-rg \
+            --image taurusapiregistry.azurecr.io/taurus-api-debug:latest
+        else
+          echo "Creating new diagnostic app..."
+          # Create the container app
+          az containerapp create \
+            --name taurus-api-debug \
+            --resource-group taurus-api-rg \
+            --environment taurusapi-environment \
+            --registry-server taurusapiregistry.azurecr.io \
+            --registry-username "${{ env.ACR_USERNAME }}" \
+            --registry-password "${{ env.ACR_PASSWORD }}" \
+            --image taurusapiregistry.azurecr.io/taurus-api-debug:latest \
+            --target-port 8000 \
+            --ingress external \
+            --min-replicas 1 \
+            --max-replicas 1 \
+            --cpu 0.5 \
+            --memory 1.0Gi
+        fi
       
-    - name: Get Container App URL
+    - name: Get Diagnostic App URL
       run: |
-        echo "Deployment successful! Your API is available at: https://$(az containerapp show --name taurus-api --resource-group taurus-api-rg --query properties.configuration.ingress.fqdn -o tsv)" 
+        DEBUG_URL=$(az containerapp show --name taurus-api-debug --resource-group taurus-api-rg --query properties.configuration.ingress.fqdn -o tsv)
+        echo "Diagnostic deployment successful! Try these endpoints:"
+        echo "- Homepage: https://$DEBUG_URL"
+        echo "- Health check: https://$DEBUG_URL/health"
+        echo "- Environment info: https://$DEBUG_URL/info" 

@@ -1,0 +1,27 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install minimal dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create simple requirements file
+RUN echo "flask==2.3.3\nflask-cors==4.0.0\ngunicorn==21.2.0" > /app/requirements.txt
+
+# Install requirements
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy just the diagnostic app
+COPY diagnostics.py .
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1
+
+# Expose port
+EXPOSE 8000
+
+# Start Gunicorn server with diagnostics app
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "600", "diagnostics:app"] 
