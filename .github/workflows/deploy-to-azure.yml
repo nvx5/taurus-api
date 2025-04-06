@@ -68,10 +68,47 @@ jobs:
         
         # Configure health probes with JSON - longer timeouts for AstroSeek
         echo "Setting health probes..."
+        
+        # Create a temporary JSON file for the container configuration
+        cat > container_config.json << EOF
+        {
+          "containers": [
+            {
+              "name": "taurus-api",
+              "probes": [
+                {
+                  "type": "liveness",
+                  "httpGet": {
+                    "path": "/health",
+                    "port": 8000
+                  },
+                  "initialDelaySeconds": 60,
+                  "periodSeconds": 60,
+                  "timeoutSeconds": 15,
+                  "failureThreshold": 3,
+                  "successThreshold": 1
+                },
+                {
+                  "type": "readiness",
+                  "httpGet": {
+                    "path": "/health",
+                    "port": 8000
+                  },
+                  "initialDelaySeconds": 45,
+                  "periodSeconds": 20,
+                  "timeoutSeconds": 15
+                }
+              ]
+            }
+          ]
+        }
+        EOF
+        
+        # Update the container app with the new configuration
         az containerapp update \
           --name taurus-api \
           --resource-group taurus-api-rg \
-          --set "template.containers[0].probes=[{\"type\":\"liveness\",\"httpGet\":{\"path\":\"/health\",\"port\":8000},\"initialDelaySeconds\":60,\"periodSeconds\":60,\"timeoutSeconds\":15,\"failureThreshold\":3,\"successThreshold\":1},{\"type\":\"readiness\",\"httpGet\":{\"path\":\"/health\",\"port\":8000},\"initialDelaySeconds\":45,\"periodSeconds\":20,\"timeoutSeconds\":15}]"
+          --containers @container_config.json
       
     - name: Get Container App URL and Status
       run: |
