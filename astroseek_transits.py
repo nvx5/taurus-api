@@ -2,8 +2,7 @@
 Astrological Transit Calculator - AstroSeek Integration Module
 
 This module provides functionality to calculate transits using the AstroSeek website.
-It uses web scraping to fetch transit data from AstroSeek and formats it to match
-the structure of transits calculated with the Swiss Ephemeris.
+It uses web scraping to fetch transit data from AstroSeek and formats it to match the expected structure.
 """
 
 import re
@@ -14,16 +13,11 @@ from datetime import datetime
 from typing import Dict, List, Any, Tuple, Optional, Union
 
 import requests
+from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from bs4 import BeautifulSoup
-
-from astro_transits import fetch_transit_interpretation
-from utils import parse_coordinates, get_planet_symbol, get_aspect_symbol, zodiac_sign_symbol
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -49,26 +43,247 @@ PLANET_INDEX_MAPPING = {
     "Pluto": 9
 }
 
-RULERSHIP = {
-    "Sun": ["Leo"],
-    "Moon": ["Cancer"],
-    "Mercury": ["Gemini", "Virgo"],
-    "Venus": ["Taurus", "Libra"],
-    "Mars": ["Aries"],
-    "Jupiter": ["Sagittarius"],
-    "Saturn": ["Capricorn"],
-    "Uranus": ["Aquarius"],
-    "Neptune": ["Pisces"],
-    "Pluto": ["Scorpio"]
+# Mapping for aspect abbreviations in URLs
+ASPECT_URL_ABBR = {
+    "conjunction": "cj",
+    "opposition": "op",
+    "square": "op",
+    "trine": "tr",
+    "sextile": "tr"
 }
 
-ASPECT_MAPPING = {
-    "conjunction": "cj",
-    "trine": "tr",
-    "sextile": "sx",
-    "square": "sq",
-    "opposition": "op"
+# Planet abbreviations for URL construction
+PLANET_URL_ABBR = {
+    "Sun": "sun",
+    "Moon": "moon",
+    "Mercury": "mercury",
+    "Venus": "venus",
+    "Mars": "mars",
+    "Jupiter": "jupiter",
+    "Saturn": "saturn",
+    "Uranus": "uranus",
+    "Neptune": "neptune",
+    "Pluto": "pluto"
 }
+
+# Astrology interpretation website base URL
+ASTRO_X_FILES_BASE_URL = "https://www.astrology-x-files.com/transits/"
+
+# Cache for transit interpretations to avoid multiple requests
+TRANSIT_INTERPRETATION_CACHE = {}
+
+def parse_coordinates(coord_str):
+    """Parse coordinates in the format "51n39 0w24" to decimal degrees
+    
+    Args:
+        coord_str: Coordinate string in format "51n39 0w24" (lat deg, lat direction, lat min, long deg, long direction, long min)
+        
+    Returns:
+        Tuple (latitude, longitude) in decimal degrees
+    """
+    # Remove any spaces that might be present
+    coord_str = coord_str.replace(" ", "")
+    
+    # Try to parse the coordinate string
+    try:
+        # Find the positions of 'n', 's', 'e', 'w' (case insensitive)
+        lat_dir_pos = -1
+        for i, char in enumerate(coord_str):
+            if char.lower() in ['n', 's']:
+                lat_dir_pos = i
+                break
+        
+        if lat_dir_pos == -1:
+            raise ValueError("Latitude direction (n/s) not found")
+        
+        lng_dir_pos = -1
+        for i, char in enumerate(coord_str):
+            if char.lower() in ['e', 'w']:
+                lng_dir_pos = i
+                break
+        
+        if lng_dir_pos == -1:
+            raise ValueError("Longitude direction (e/w) not found")
+        
+        # Extract latitude components
+        lat_deg = int(coord_str[:lat_dir_pos])
+        lat_dir = coord_str[lat_dir_pos].lower()
+        
+        # Find where latitude minutes end and longitude degrees start
+        lng_start = lat_dir_pos + 1
+        while lng_start < len(coord_str) and coord_str[lng_start].isdigit():
+            lng_start += 1
+        
+        lat_min = int(coord_str[lat_dir_pos+1:lng_start])
+        
+        # Now find where longitude degrees start - the first digit after the latitude minutes
+        lng_deg_start = lng_start
+        while lng_deg_start < len(coord_str) and not coord_str[lng_deg_start].isdigit():
+            lng_deg_start += 1
+        
+        if lng_deg_start >= lng_dir_pos:
+            # No longitude degrees specified
+            lng_deg = 0
+        else:
+            lng_deg = int(coord_str[lng_deg_start:lng_dir_pos])
+        
+        # Get longitude direction
+        lng_dir = coord_str[lng_dir_pos].lower()
+        
+        # Extract longitude minutes
+        lng_min_start = lng_dir_pos + 1
+        if lng_min_start < len(coord_str):
+            lng_min = int(coord_str[lng_min_start:])
+        else:
+            lng_min = 0
+        
+        # Convert to decimal degrees
+        lat_decimal = lat_deg + (lat_min / 60.0)
+        if lat_dir == 's':
+            lat_decimal = -lat_decimal
+            
+        lng_decimal = lng_deg + (lng_min / 60.0)
+        if lng_dir == 'w':
+            lng_decimal = -lng_decimal
+            
+        return lat_decimal, lng_decimal
+    
+    except (ValueError, IndexError) as e:
+        raise ValueError(f"Could not parse coordinates: {coord_str}. Error: {e}")
+
+def get_planet_symbol(planet_name):
+    """Get symbol for planet"""
+    symbols = {
+        "Sun": "☉",
+        "Moon": "☽",
+        "Mercury": "☿",
+        "Venus": "♀",
+        "Mars": "♂",
+        "Jupiter": "♃",
+        "Saturn": "♄",
+        "Uranus": "♅",
+        "Neptune": "♆",
+        "Pluto": "♇",
+        "North Node": "☊",
+        "South Node": "☋",
+        "Chiron": "⚷"
+    }
+    return symbols.get(planet_name, planet_name)
+
+def get_aspect_symbol(aspect_name):
+    """Get symbol for aspect type"""
+    symbols = {
+        "conjunction": "☌",
+        "opposition": "☍",
+        "square": "□",
+        "trine": "△",
+        "sextile": "⚹",
+        "quincunx": "⚻",
+        "semisextile": "⚺",
+        "semisquare": "∠",
+        "sesquisquare": "⚼"
+    }
+    return symbols.get(aspect_name, aspect_name)
+
+def zodiac_sign_symbol(angle):
+    """Get zodiac sign symbol from angle"""
+    signs = ["♈", "♉", "♊", "♋", "♌", "♍", "♎", "♏", "♐", "♑", "♒", "♓"]
+    sign_index = int(angle / 30) % 12
+    return signs[sign_index]
+
+def get_transit_interpretation_url(transit_planet, aspect, natal_planet):
+    """
+    Generate the URL for the interpretation of a specific transit.
+    
+    Args:
+        transit_planet: Transiting planet name
+        aspect: Aspect name
+        natal_planet: Natal planet name
+        
+    Returns:
+        URL for the interpretation or None if not available
+    """
+    # Get the abbreviations for URL construction
+    transit_abbr = PLANET_URL_ABBR.get(transit_planet)
+    aspect_abbr = ASPECT_URL_ABBR.get(aspect.lower())
+    natal_abbr = PLANET_URL_ABBR.get(natal_planet)
+    
+    # Return None if any part is missing
+    if not all([transit_abbr, aspect_abbr, natal_abbr]):
+        return None
+    
+    # Construct URL pattern
+    return f"{ASTRO_X_FILES_BASE_URL}{transit_abbr}-{aspect_abbr}-{natal_abbr}.html"
+
+def fetch_transit_interpretation(transit_planet, aspect, natal_planet):
+    """
+    Fetch interpretation for a specific transit from astrology-x-files.com.
+    
+    Args:
+        transit_planet: Transiting planet name
+        aspect: Aspect name
+        natal_planet: Natal planet name
+        
+    Returns:
+        Dictionary with interpretation text and source URL
+    """
+    # Generate a cache key
+    cache_key = f"{transit_planet}_{aspect}_{natal_planet}"
+    
+    # Return cached interpretation if available
+    if cache_key in TRANSIT_INTERPRETATION_CACHE:
+        return TRANSIT_INTERPRETATION_CACHE[cache_key]
+    
+    # Get URL for this transit
+    url = get_transit_interpretation_url(transit_planet, aspect, natal_planet)
+    if not url:
+        return {"interpretation": None, "source_url": None}
+    
+    try:
+        # Make request to fetch the content
+        response = requests.get(url, timeout=10)
+        
+        # Check if request was successful
+        if response.status_code == 200:
+            # Parse HTML content
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Get the main content div
+            main_content = soup.find('div', id='maincontent')
+            
+            if main_content:
+                # Extract paragraphs after the horizontal rule
+                hr_tag = main_content.find('hr')
+                if hr_tag:
+                    # Get the first paragraph after the hr tag
+                    current = hr_tag.next_sibling
+                    first_paragraph = None
+                    
+                    while current and not first_paragraph:
+                        if current.name == 'p':
+                            # Skip the "More on determining planetary condition..." paragraph
+                            text = current.get_text().strip()
+                            if not text.startswith("More on determining planetary condition"):
+                                first_paragraph = text
+                        current = current.next_sibling
+                    
+                    if first_paragraph:
+                        # Cache the interpretation
+                        result = {
+                            "interpretation": first_paragraph,
+                            "source_url": url
+                        }
+                        TRANSIT_INTERPRETATION_CACHE[cache_key] = result
+                        return result
+    
+    except Exception as e:
+        # Log error but don't fail the whole process
+        logger.error(f"Error fetching transit interpretation: {e}")
+    
+    # Return empty result if interpretation couldn't be fetched
+    result = {"interpretation": None, "source_url": None}
+    TRANSIT_INTERPRETATION_CACHE[cache_key] = result
+    return result
 
 def generate_astroseek_url(birth_data, period_data):
     """
@@ -166,6 +381,11 @@ def generate_astroseek_url(birth_data, period_data):
     url += f"&muz_narozeni_delka_minuty={lng_min}"
     url += f"&muz_narozeni_delka_smer={lng_dir}"
     
+    # Set house system - from birth_data or default to Whole Sign
+    house_system_code = "whole_sign"
+    if birth_data.get("house_system", "W") == "P":
+        house_system_code = "placidus"
+    
     # Add other parameters
     url += (
         f"&muz_narozeni_timezone_form=auto"
@@ -177,7 +397,7 @@ def generate_astroseek_url(birth_data, period_data):
         f"&revoluce_narozeni_rok_do={transit_year}"
         f"&revoluce_narozeni_mesic={transit_month:02d}"
         f"&progrese="
-        f"&house_system=whole_horizon"
+        f"&house_system={house_system_code}"
     )
     
     return url
@@ -194,7 +414,7 @@ def determine_ascendant_and_houses(birth_data):
     Returns:
         Tuple of (ascendant_sign, house_positions)
     """
-    # Using Nil's default values as in TransitReport.py
+    # Using default values since we don't need precise house positions
     ascendant = "Cancer"
     house_positions = [11, 4, 11, 10, 6, 12, 12, 8, 8, 6]
     
@@ -364,7 +584,7 @@ def fetch_transits_from_astroseek(birth_data, period_data):
     logger.info(f"Using Ascendant: {ascendant}")
     
     try:
-        # Initialize the Selenium WebDriver with headless mode for Azure
+        # Initialize the Selenium WebDriver with headless mode
         chrome_options = webdriver.ChromeOptions()
         chrome_options.add_argument('--headless')
         chrome_options.add_argument('--no-sandbox')
@@ -411,58 +631,4 @@ def fetch_transits_from_astroseek(birth_data, period_data):
         
     except Exception as e:
         logger.error(f"Error fetching transits from AstroSeek: {e}")
-        return []
-
-def get_astroseek_transits(birth_data, period_data, config=None):
-    """
-    Get transits from AstroSeek with the same interface as get_transits in astro_transits.py.
-    
-    Args:
-        birth_data: Dictionary containing birth information
-        period_data: Dictionary or string containing period information
-        config: Configuration options (optional)
-        
-    Returns:
-        List of transit dictionaries
-    """
-    logger.info("Starting AstroSeek transit calculation...")
-    
-    # Validate birth data
-    if not birth_data:
-        logger.error("No birth data provided")
-        return []
-        
-    required_fields = ["date", "time"]
-    for field in required_fields:
-        if field not in birth_data:
-            logger.error(f"Birth data missing required field: {field}")
-            return []
-    
-    # Either coordinates must be provided
-    if "coordinates" not in birth_data:
-        logger.error("Birth data must include coordinates")
-        return []
-    
-    # Validate period data
-    if not period_data:
-        logger.error("No period data provided")
-        return []
-    
-    # Fetch transits from AstroSeek
-    transits = fetch_transits_from_astroseek(birth_data, period_data)
-    
-    # Filter by aspect set if specified
-    if config and "aspect_set" in config and config["aspect_set"] != "all":
-        if config["aspect_set"] == "major":
-            major_aspects = ["conjunction", "opposition", "square", "trine", "sextile"]
-            transits = [t for t in transits if t["aspect"].lower() in major_aspects]
-        else:
-            # Custom aspect set
-            aspect_set = config["aspect_set"]
-            if isinstance(aspect_set, list):
-                transits = [t for t in transits if t["aspect"].lower() in aspect_set]
-    
-    # Sort by date and time
-    transits = sorted(transits, key=lambda t: (t["date"], t["time"]))
-    
-    return transits 
+        return [] 

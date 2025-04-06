@@ -66,12 +66,12 @@ jobs:
           --memory 2Gi \
           --image taurusapiregistry.azurecr.io/taurus-api:latest
         
-        # Configure health probes with JSON
+        # Configure health probes with JSON - longer timeouts for AstroSeek
         echo "Setting health probes..."
         az containerapp update \
           --name taurus-api \
           --resource-group taurus-api-rg \
-          --set "template.containers[0].probes=[{\"type\":\"liveness\",\"httpGet\":{\"path\":\"/health\",\"port\":8000},\"initialDelaySeconds\":30,\"periodSeconds\":30,\"timeoutSeconds\":5,\"failureThreshold\":3,\"successThreshold\":1},{\"type\":\"readiness\",\"httpGet\":{\"path\":\"/health\",\"port\":8000},\"initialDelaySeconds\":15,\"periodSeconds\":10}]"
+          --set "template.containers[0].probes=[{\"type\":\"liveness\",\"httpGet\":{\"path\":\"/health\",\"port\":8000},\"initialDelaySeconds\":60,\"periodSeconds\":60,\"timeoutSeconds\":15,\"failureThreshold\":3,\"successThreshold\":1},{\"type\":\"readiness\",\"httpGet\":{\"path\":\"/health\",\"port\":8000},\"initialDelaySeconds\":45,\"periodSeconds\":20,\"timeoutSeconds\":15}]"
       
     - name: Get Container App URL and Status
       run: |

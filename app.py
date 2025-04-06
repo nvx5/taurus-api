@@ -4,7 +4,6 @@ import os
 import json
 import logging
 from flask_cors import CORS
-from astro_transits import get_transits
 from astroseek_transits import fetch_transits_from_astroseek
 
 # Configure logging
@@ -38,19 +37,10 @@ def bad_request(error):
 @app.route('/health')
 def health_check():
     try:
-        # Try to import key modules to verify they're working
-        import swisseph
-        import flask
-        import pytz
-        import timezonefinder
-        
         # Check system paths
         import os
         import sys
-        
-        # Check if headless chrome environment is properly configured
-        chrome_bin = os.environ.get('CHROME_BIN', '/usr/bin/chromium')
-        chrome_exists = os.path.exists(chrome_bin)
+        import flask
         
         # Generate detailed health status for debugging
         health_status = {
@@ -59,10 +49,7 @@ def health_check():
             "environment": {
                 "python_version": sys.version,
                 "flask_version": flask.__version__,
-                "working_directory": os.getcwd(),
-                "chrome_configured": chrome_bin,
-                "chrome_exists": chrome_exists,
-                "environment_vars": {k: v for k, v in os.environ.items() if k.startswith(('CHROME', 'DISPLAY', 'PYTHONPATH', 'PATH', 'SELENIUM'))}
+                "working_directory": os.getcwd()
             }
         }
         
@@ -107,10 +94,7 @@ def index():
                 </ul>
                 <br>Optional parameters:
                 <ul>
-                    <li>current_coordinates - Current coordinates in "51n39 0w24" format (defaults to birth coordinates)</li>
                     <li>house_system - House system to use (W for Whole Sign, P for Placidus, defaults to W)</li>
-                    <li>astroseek - Set to "1" to use AstroSeek calculation (defaults to Swiss Ephemeris)</li>
-                    <li>aspect_set - Set of aspects to use (major, minor, all; defaults to major)</li>
                 </ul>
             </li>
             <li>
@@ -161,13 +145,9 @@ def calculate_transits():
             }), 400
         
         # Optional parameters
-        current_coordinates = params.get('current_coordinates', birth_coordinates)
         house_system = params.get('house_system', 'W')
-        use_astroseek = params.get('astroseek', '0') == '1'
-        aspect_set = params.get('aspect_set', 'major')
         
-        logger.info(f"Processing request for birth date: {birth_date}, month: {month}, "
-                   f"using {'AstroSeek' if use_astroseek else 'Swiss Ephemeris'}")
+        logger.info(f"Processing request for birth date: {birth_date}, month: {month}")
         
         # Construct birth data
         birth_data = {
@@ -177,22 +157,9 @@ def calculate_transits():
             "house_system": house_system
         }
         
-        # Configure calculation options
-        config = {
-            "current_coordinates": current_coordinates,
-            "aspect_set": aspect_set,
-            "house_system": house_system
-        }
-        
-        # Calculate transits
-        if use_astroseek:
-            # Use AstroSeek calculation
-            logger.info("Using AstroSeek for transit calculation")
-            transits = fetch_transits_from_astroseek(birth_data, month)
-        else:
-            # Use Swiss Ephemeris calculation
-            logger.info("Using Swiss Ephemeris for transit calculation")
-            transits = get_transits(birth_data, month, config)
+        # Calculate transits using AstroSeek
+        logger.info("Using AstroSeek for transit calculation")
+        transits = fetch_transits_from_astroseek(birth_data, month)
         
         logger.info(f"Found {len(transits)} transits")
         
@@ -259,9 +226,7 @@ def calculate_transits():
                 "birth_coordinates": birth_coordinates,
                 "house_system": house_system,
                 "period": month,
-                "current_coordinates": current_coordinates,
-                "aspect_set": aspect_set,
-                "calculation_method": "AstroSeek" if use_astroseek else "Swiss Ephemeris"
+                "calculation_method": "AstroSeek"
             },
             "total_transits": len(clean_transits),
             "transits": clean_transits
