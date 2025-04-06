@@ -37,7 +37,43 @@ def bad_request(error):
 # Health check endpoint for Azure monitoring
 @app.route('/health')
 def health_check():
-    return jsonify({"status": "healthy", "version": "1.0.0"})
+    try:
+        # Try to import key modules to verify they're working
+        import swisseph
+        import flask
+        import pytz
+        import timezonefinder
+        
+        # Check system paths
+        import os
+        import sys
+        
+        # Check if headless chrome environment is properly configured
+        chrome_bin = os.environ.get('CHROME_BIN', '/usr/bin/chromium')
+        chrome_exists = os.path.exists(chrome_bin)
+        
+        # Generate detailed health status for debugging
+        health_status = {
+            "status": "healthy",
+            "version": "1.0.0",
+            "environment": {
+                "python_version": sys.version,
+                "flask_version": flask.__version__,
+                "working_directory": os.getcwd(),
+                "chrome_configured": chrome_bin,
+                "chrome_exists": chrome_exists,
+                "environment_vars": {k: v for k, v in os.environ.items() if k.startswith(('CHROME', 'DISPLAY', 'PYTHONPATH', 'PATH', 'SELENIUM'))}
+            }
+        }
+        
+        return jsonify(health_status)
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}", exc_info=True)
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "version": "1.0.0"
+        }), 500
 
 @app.route('/')
 def index():

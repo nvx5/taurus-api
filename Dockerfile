@@ -1,9 +1,8 @@
-ARG PYTHON_VERSION=3.10
-FROM python:${PYTHON_VERSION}-slim
+FROM python:3.10-slim
 
 WORKDIR /app
 
-# Install Chrome and other dependencies for Selenium
+# Install Chrome and other dependencies for Selenium - be more thorough
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -46,16 +45,28 @@ RUN apt-get update && apt-get install -y \
     libxtst6 \
     git \
     build-essential \
+    curl \
+    procps \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Set environment variables for Chrome
+# Set environment variables for Chrome with fixed paths
 ENV DISPLAY=:99
 ENV CHROME_BIN=/usr/bin/chromium
 ENV CHROMIUM_PATH=/usr/bin/chromium
 ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 ENV SELENIUM_HEADLESS=1
 ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+
+# Create Xvfb startup script
+RUN echo '#!/bin/bash\nXvfb :99 -screen 0 1280x1024x24 -ac &\necho "Starting Xvfb..."\nsleep 2\necho "Starting Gunicorn..."\nexec "$@"' > /entrypoint.sh \
+    && chmod +x /entrypoint.sh
+
+# Test Chrome can start in the container
+RUN echo "Testing Chrome installation..." && \
+    $CHROME_BIN --version && \
+    echo "Chrome installation verified!"
 
 # Copy requirements first
 COPY requirements.txt .
@@ -65,20 +76,23 @@ RUN grep -v "swisseph" requirements.txt > requirements_without_swisseph.txt && \
     pip install --no-cache-dir -r requirements_without_swisseph.txt
 
 # Install swisseph directly from source
-RUN pip install swisseph
+RUN pip install swisseph==0.8.0
 
 # Copy application files
 COPY . .
 
-# Create a script to start Xvfb before running the app
-RUN echo '#!/bin/bash\nXvfb :99 -screen 0 1280x1024x24 -ac &\nexec "$@"' > /entrypoint.sh \
-    && chmod +x /entrypoint.sh
+# Create a healthcheck file for faster startup probes
+RUN echo '#!/bin/bash\ncurl -f http://localhost:8000/health || exit 1' > /healthcheck.sh && \
+    chmod +x /healthcheck.sh
 
-# Expose port
+# Create a simple readiness script
+RUN echo "print('Ready!')" > /app/ready.py
+
+# Expose port - use 8000 as Azure Container Apps prefers it
 EXPOSE 8000
 
 # Use the entrypoint script
 ENTRYPOINT ["/entrypoint.sh"]
 
-# Start Gunicorn server
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "600", "app:app"] 
+# Start Gunicorn server with higher timeout and workers
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--timeout", "600", "--workers", "2", "--threads", "4", "app:app"] 
